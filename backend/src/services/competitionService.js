@@ -1,6 +1,33 @@
 import { prisma } from '../config/database.js';
 import { HttpError } from '../utils/httpError.js';
 
+/** Team–competition qualification pipeline (stored on competition_teams). */
+export const QualificationStatus = {
+  APPLIED: 'APPLIED',
+  APPROVED_FOR_QUALIFIERS: 'APPROVED_FOR_QUALIFIERS',
+  QUALIFIED: 'QUALIFIED',
+  REJECTED: 'REJECTED',
+};
+
+const QS = QualificationStatus;
+
+async function assertTeamMember(userId, teamId) {
+  const m = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId, userId } },
+  });
+  if (!m) throw new HttpError(403, 'You are not a member of this team');
+}
+
+async function countQualified(competitionId) {
+  return prisma.competitionTeam.count({
+    where: { competitionId, qualificationStatus: QS.QUALIFIED },
+  });
+}
+
+function isMainDrawFull(comp, qualifiedCount) {
+  return qualifiedCount >= comp.maxTeams;
+}
+
 export async function listPublicCompetitions() {
   return prisma.competition.findMany({
     where: { status: { in: ['OPEN', 'CLOSED', 'COMPLETED'] } },
@@ -55,24 +82,131 @@ export async function listJoinedCompetitions(userId) {
   });
 }
 
-export async function joinCompetition(teamId, competitionId) {
+export async function applyToQualifiers(userId, teamId, competitionId) {
+  await assertTeamMember(userId, teamId);
   const comp = await prisma.competition.findUnique({
     where: { id: competitionId },
   });
   if (!comp) throw new HttpError(404, 'Competition not found');
   if (comp.status !== 'OPEN') {
-    throw new HttpError(400, 'Competition is not open for joining');
+    throw new HttpError(400, 'Competition is not open for applications');
   }
+  const qualified = await countQualified(competitionId);
+  if (isMainDrawFull(comp, qualified)) {
+    throw new HttpError(400, 'Competition is full — no new applications');
+  }
+
+  const existing = await prisma.competitionTeam.findUnique({
+    where: { competitionId_teamId: { competitionId, teamId } },
+  });
+
+  if (existing) {
+    if (existing.qualificationStatus === QS.QUALIFIED) {
+      throw new HttpError(409, 'Team is already qualified for the main competition');
+    }
+    if (existing.qualificationStatus === QS.APPROVED_FOR_QUALIFIERS) {
+      throw new HttpError(
+        409,
+        'Team is approved for qualifiers — awaiting admin to mark as qualified',
+      );
+    }
+    if (existing.qualificationStatus === QS.APPLIED) {
+      throw new HttpError(409, 'Application already pending admin review');
+    }
+    if (existing.qualificationStatus === QS.REJECTED) {
+      return prisma.competitionTeam.update({
+        where: { id: existing.id },
+        data: { qualificationStatus: QS.APPLIED },
+      });
+    }
+  }
+
   try {
     return await prisma.competitionTeam.create({
-      data: { competitionId, teamId },
+      data: {
+        competitionId,
+        teamId,
+        qualificationStatus: QS.APPLIED,
+      },
     });
   } catch (e) {
     if (e.code === 'P2002') {
-      throw new HttpError(409, 'Team already enrolled');
+      throw new HttpError(409, 'Team already has an application for this competition');
     }
     throw e;
   }
+}
+
+export async function adminListQualificationTeams(competitionId) {
+  const comp = await prisma.competition.findUnique({ where: { id: competitionId } });
+  if (!comp) throw new HttpError(404, 'Competition not found');
+  const teams = await prisma.competitionTeam.findMany({
+    where: { competitionId },
+    include: { team: true },
+    orderBy: { joinedAt: 'asc' },
+  });
+  const qualifiedCount = teams.filter((t) => t.qualificationStatus === QS.QUALIFIED)
+    .length;
+  return { competition: comp, teams, qualifiedCount };
+}
+
+export async function adminApproveForQualifiers(competitionId, teamId) {
+  const comp = await prisma.competition.findUnique({ where: { id: competitionId } });
+  if (!comp) throw new HttpError(404, 'Competition not found');
+  const qualified = await countQualified(competitionId);
+  if (isMainDrawFull(comp, qualified)) {
+    throw new HttpError(400, 'Competition main draw is full');
+  }
+  const row = await prisma.competitionTeam.findUnique({
+    where: { competitionId_teamId: { competitionId, teamId } },
+  });
+  if (!row) throw new HttpError(404, 'Team application not found');
+  if (row.qualificationStatus !== QS.APPLIED) {
+    throw new HttpError(400, 'Team is not in APPLIED status');
+  }
+  return prisma.competitionTeam.update({
+    where: { id: row.id },
+    data: { qualificationStatus: QS.APPROVED_FOR_QUALIFIERS },
+  });
+}
+
+export async function adminQualifyForMain(competitionId, teamId) {
+  const comp = await prisma.competition.findUnique({ where: { id: competitionId } });
+  if (!comp) throw new HttpError(404, 'Competition not found');
+  const qualified = await countQualified(competitionId);
+  if (isMainDrawFull(comp, qualified)) {
+    throw new HttpError(400, 'Main competition is full — cannot add more qualified teams');
+  }
+  const row = await prisma.competitionTeam.findUnique({
+    where: { competitionId_teamId: { competitionId, teamId } },
+  });
+  if (!row) throw new HttpError(404, 'Team application not found');
+  if (row.qualificationStatus !== QS.APPROVED_FOR_QUALIFIERS) {
+    throw new HttpError(400, 'Team must be approved for qualifiers first');
+  }
+  return prisma.competitionTeam.update({
+    where: { id: row.id },
+    data: { qualificationStatus: QS.QUALIFIED },
+  });
+}
+
+export async function adminRejectQualificationApplication(competitionId, teamId) {
+  const comp = await prisma.competition.findUnique({ where: { id: competitionId } });
+  if (!comp) throw new HttpError(404, 'Competition not found');
+  const row = await prisma.competitionTeam.findUnique({
+    where: { competitionId_teamId: { competitionId, teamId } },
+  });
+  if (!row) throw new HttpError(404, 'Team application not found');
+  if (
+    row.qualificationStatus !== QS.APPLIED &&
+    row.qualificationStatus !== QS.APPROVED_FOR_QUALIFIERS
+  ) {
+    throw new HttpError(400, 'Only pending applications can be rejected');
+  }
+  return prisma.competitionTeam.update({
+    where: { id: row.id },
+    data: { qualificationStatus: QS.REJECTED },
+  });
 }
 
 function pickDefined(obj, keys) {
@@ -88,6 +222,8 @@ export async function adminUpsertCompetition(data) {
     const patch = pickDefined(data, [
       'name',
       'description',
+      'sportType',
+      'maxTeams',
       'startDate',
       'endDate',
       'status',
@@ -104,6 +240,7 @@ export async function adminUpsertCompetition(data) {
       startDate: data.startDate,
       endDate: data.endDate ?? null,
       status: data.status || 'DRAFT',
+      ...pickDefined(data, ['sportType', 'maxTeams']),
     },
   });
 }

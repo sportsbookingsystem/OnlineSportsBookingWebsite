@@ -196,13 +196,30 @@ function PlayerDashboard() {
       </div>
 
       <div className="card">
-        <h2>Competitions joined ({joined.length})</h2>
+        <h2>My competitions ({joined.length})</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Status reflects the qualification pipeline (applied → approved for qualifiers → qualified).
+        </p>
         <ul>
-          {joined.map((c) => (
-            <li key={c.id}>
-              {c.name} <span className="badge">{c.status}</span>
-            </li>
-          ))}
+          {joined.map((c) => {
+            const mine = (c.teams || []).filter((ct) =>
+              teams.some((t) => t.id === ct.teamId),
+            );
+            return (
+              <li key={c.id}>
+                <strong>{c.name}</strong> <span className="badge">{c.status}</span>
+                {mine.length ? (
+                  <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.2rem' }}>
+                    {mine.map((ct) => (
+                      <li key={ct.id} className="muted">
+                        {ct.team?.name}: <span className="badge">{ct.qualificationStatus}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       </div>
 
@@ -1136,8 +1153,67 @@ function AdminDashboard() {
   const [facilities, setFacilities] = useState([]);
   const [rewards, setRewards] = useState([]);
   const [pendingRoles, setPendingRoles] = useState([]);
+  const [publicComps, setPublicComps] = useState([]);
+  const [qualCompId, setQualCompId] = useState('');
+  const [qualData, setQualData] = useState(null);
+  const [qualSearch, setQualSearch] = useState('');
+  const [qualLoading, setQualLoading] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiRequest('/api/public/competitions', { token: null });
+        if (cancelled) return;
+        const list = data.competitions || [];
+        setPublicComps(list);
+        setQualCompId((prev) => prev || (list[0] ? String(list[0].id) : ''));
+      } catch {
+        /* optional */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loadQualification = useCallback(async () => {
+    if (!qualCompId) {
+      setQualData(null);
+      return;
+    }
+    setQualLoading(true);
+    try {
+      const data = await apiRequest(
+        `/api/admin/competitions/${qualCompId}/qualification-teams`,
+      );
+      setQualData(data);
+    } catch (e) {
+      setMsg({ type: 'error', text: e.message });
+      setQualData(null);
+    } finally {
+      setQualLoading(false);
+    }
+  }, [qualCompId]);
+
+  useEffect(() => {
+    loadQualification();
+  }, [loadQualification]);
+
+  async function qualAction(relPath, teamId) {
+    setMsg(null);
+    try {
+      await apiRequest(`/api/admin/competitions/${qualCompId}${relPath}`, {
+        method: 'POST',
+        body: { teamId },
+      });
+      await loadQualification();
+    } catch (e) {
+      setMsg({ type: 'error', text: e.message });
+    }
+  }
 
   const loadAll = useCallback(async () => {
     setErr('');
@@ -1320,6 +1396,135 @@ function AdminDashboard() {
           </ul>
         </div>
       ) : null}
+
+      <div className="card">
+        <h2>Competition qualifications</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Review applications: approve for qualifiers, then mark the best teams as qualified for the
+          main draw (respects max teams).
+        </p>
+        {publicComps.length === 0 ? (
+          <p className="muted">No competitions to show.</p>
+        ) : (
+          <>
+            <div className="form-group" style={{ maxWidth: 400 }}>
+              <label htmlFor="adminQualComp">Competition</label>
+              <select
+                id="adminQualComp"
+                value={qualCompId}
+                onChange={(e) => {
+                  setQualCompId(e.target.value);
+                  setQualSearch('');
+                }}
+              >
+                {publicComps.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.status})
+                  </option>
+                ))}
+              </select>
+            </div>
+            {qualLoading ? (
+              <p className="muted">Loading teams…</p>
+            ) : qualData?.competition ? (
+              <>
+                <p style={{ marginBottom: '0.75rem' }}>
+                  <span className="badge">Sport: {qualData.competition.sportType || 'Multi-sport'}</span>{' '}
+                  <span className="muted">
+                    Qualified: {qualData.qualifiedCount ?? 0} /{' '}
+                    {qualData.competition.maxTeams ?? 8}
+                  </span>
+                  {(qualData.qualifiedCount ?? 0) >= (qualData.competition.maxTeams ?? 8) ? (
+                    <span className="badge badge-warm" style={{ marginLeft: '0.35rem' }}>
+                      Main draw full
+                    </span>
+                  ) : null}
+                </p>
+                {(qualData.teams || []).length > 6 ? (
+                  <div className="form-group" style={{ maxWidth: 320 }}>
+                    <label htmlFor="qualSearch">Filter teams</label>
+                    <input
+                      id="qualSearch"
+                      placeholder="Search by team name…"
+                      value={qualSearch}
+                      onChange={(e) => setQualSearch(e.target.value)}
+                    />
+                  </div>
+                ) : null}
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="data">
+                    <thead>
+                      <tr>
+                        <th>Team</th>
+                        <th>Status</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(qualData.teams || [])
+                        .filter((row) => {
+                          const q = qualSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          return (row.team?.name || '').toLowerCase().includes(q);
+                        })
+                        .map((row) => (
+                          <tr key={row.id}>
+                            <td>{row.team?.name}</td>
+                            <td>
+                              <span className="badge">{row.qualificationStatus}</span>
+                            </td>
+                            <td style={{ whiteSpace: 'nowrap' }}>
+                              {row.qualificationStatus === 'APPLIED' ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-primary"
+                                    onClick={() =>
+                                      qualAction('/qualification/approve-for-qualifiers', row.teamId)
+                                    }
+                                  >
+                                    Approve for qualifiers
+                                  </button>{' '}
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm"
+                                    onClick={() => qualAction('/qualification/reject', row.teamId)}
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : null}
+                              {row.qualificationStatus === 'APPROVED_FOR_QUALIFIERS' ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-primary"
+                                    onClick={() => qualAction('/qualification/qualify', row.teamId)}
+                                  >
+                                    Qualify (main draw)
+                                  </button>{' '}
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm"
+                                    onClick={() => qualAction('/qualification/reject', row.teamId)}
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <p className="muted">Select a competition.</p>
+            )}
+          </>
+        )}
+      </div>
 
       <div className="card">
         <h2>Booking report</h2>

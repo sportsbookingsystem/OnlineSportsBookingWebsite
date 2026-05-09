@@ -32,13 +32,64 @@ export async function listJoined(req, res, next) {
   }
 }
 
-export async function join(req, res, next) {
+export async function applyToQualifiers(req, res, next) {
   try {
-    await competitionService.joinCompetition(
+    await competitionService.applyToQualifiers(
+      req.user.id,
       Number(req.body.teamId),
       Number(req.params.id),
     );
-    res.json({ success: true, message: 'Team joined competition' });
+    res.json({
+      success: true,
+      message: 'Application submitted — an admin will review your team for qualifiers.',
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function adminListQualification(req, res, next) {
+  try {
+    const result = await competitionService.adminListQualificationTeams(
+      Number(req.params.id),
+    );
+    res.json({ success: true, ...result });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function adminApproveForQualifiers(req, res, next) {
+  try {
+    await competitionService.adminApproveForQualifiers(
+      Number(req.params.id),
+      Number(req.body.teamId),
+    );
+    res.json({ success: true, message: 'Team approved for qualifiers' });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function adminQualifyForMain(req, res, next) {
+  try {
+    await competitionService.adminQualifyForMain(
+      Number(req.params.id),
+      Number(req.body.teamId),
+    );
+    res.json({ success: true, message: 'Team qualified for main competition' });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function adminRejectQualification(req, res, next) {
+  try {
+    await competitionService.adminRejectQualificationApplication(
+      Number(req.params.id),
+      Number(req.body.teamId),
+    );
+    res.json({ success: true, message: 'Application rejected' });
   } catch (e) {
     next(e);
   }

@@ -339,6 +339,8 @@ async function ensureProductionDemoContent() {
         name: DEMO_COMPETITION_NAME,
         description:
           'Open league for teams across Beirut and Tripoli venues.',
+        sportType: 'Multi-sport',
+        maxTeams: 8,
         startDate: new Date('2026-05-01'),
         endDate: new Date('2026-09-30'),
         status: 'OPEN',
@@ -380,8 +382,16 @@ async function ensureProductionDemoContent() {
 
   await prisma.competitionTeam.createMany({
     data: [
-      { competitionId: competition.id, teamId: teamHawks.id },
-      { competitionId: competition.id, teamId: teamEagles.id },
+      {
+        competitionId: competition.id,
+        teamId: teamHawks.id,
+        qualificationStatus: 'QUALIFIED',
+      },
+      {
+        competitionId: competition.id,
+        teamId: teamEagles.id,
+        qualificationStatus: 'QUALIFIED',
+      },
     ],
     skipDuplicates: true,
   });
@@ -651,6 +661,8 @@ async function main() {
     data: {
       name: 'Lebanon Summer Cup 2026',
       description: 'Open league for teams across Beirut and Tripoli venues.',
+      sportType: 'Multi-sport',
+      maxTeams: 8,
       startDate: new Date('2026-05-01'),
       endDate: new Date('2026-09-30'),
       status: 'OPEN',
@@ -675,8 +687,16 @@ async function main() {
 
   await prisma.competitionTeam.createMany({
     data: [
-      { competitionId: comp.id, teamId: teamHawks.id },
-      { competitionId: comp.id, teamId: teamEagles.id },
+      {
+        competitionId: comp.id,
+        teamId: teamHawks.id,
+        qualificationStatus: 'QUALIFIED',
+      },
+      {
+        competitionId: comp.id,
+        teamId: teamEagles.id,
+        qualificationStatus: 'QUALIFIED',
+      },
     ],
   });
 

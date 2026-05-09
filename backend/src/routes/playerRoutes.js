@@ -48,9 +48,9 @@ router.post('/teams/:teamId/join', teamController.join);
 router.get('/teams', teamController.listMine);
 
 router.post(
-  '/competitions/:id/join',
+  '/competitions/:id/apply-qualifiers',
   [body('teamId').isInt()],
-  competitionController.join,
+  competitionController.applyToQualifiers,
 );
 router.get('/competitions/joined', competitionController.listJoined);
 

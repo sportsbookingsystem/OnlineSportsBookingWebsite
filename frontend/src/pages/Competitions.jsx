@@ -7,6 +7,50 @@ import { COMPETITION_CARD_BACKGROUNDS } from '../constants/sportImages.js';
 const CARD_BG = COMPETITION_CARD_BACKGROUNDS;
 const VOLUNTEER_KEY = 'sportsbook_volunteer_players_v1';
 
+function maxTeamsCap(c) {
+  return c.maxTeams ?? 8;
+}
+
+function qualifiedCount(c) {
+  return (c.teams || []).filter((ct) => ct.qualificationStatus === 'QUALIFIED').length;
+}
+
+/** Applications still active (excludes rejected). */
+function appliedActiveCount(c) {
+  return (c.teams || []).filter((ct) => ct.qualificationStatus !== 'REJECTED').length;
+}
+
+function isMainDrawFull(c) {
+  return qualifiedCount(c) >= maxTeamsCap(c);
+}
+
+function statusLabel(status) {
+  switch (status) {
+    case 'APPLIED':
+      return 'Applied — pending admin review';
+    case 'APPROVED_FOR_QUALIFIERS':
+      return 'Approved for qualifiers';
+    case 'QUALIFIED':
+      return 'Qualified for main competition';
+    case 'REJECTED':
+      return 'Rejected — you may apply again if slots remain';
+    default:
+      return status || '—';
+  }
+}
+
+function rosterRows(detail, view, teamSearch) {
+  const q = teamSearch.trim().toLowerCase();
+  let rows = detail.teams || [];
+  if (view === 'qualified') {
+    rows = rows.filter((ct) => ct.qualificationStatus === 'QUALIFIED');
+  }
+  if (q) {
+    rows = rows.filter((ct) => (ct.team?.name || '').toLowerCase().includes(q));
+  }
+  return rows;
+}
+
 export default function Competitions() {
   const { user, isRole } = useAuth();
   const canJoin = user && isRole('PLAYER');
@@ -26,6 +70,8 @@ export default function Competitions() {
   const [volunteerNote, setVolunteerNote] = useState('');
   const [volunteerMsg, setVolunteerMsg] = useState(null);
   const [volunteers, setVolunteers] = useState([]);
+  const [teamSearch, setTeamSearch] = useState('');
+  const [rosterView, setRosterView] = useState('qualified');
 
   const loadVolunteerData = useCallback(() => {
     try {
@@ -84,6 +130,8 @@ export default function Competitions() {
   async function loadDetail(id) {
     setExpandedId(id);
     setDetail(null);
+    setTeamSearch('');
+    setRosterView('qualified');
     try {
       const data = await apiRequest(`/api/public/competitions/${id}`, {
         token: null,
@@ -94,18 +142,27 @@ export default function Competitions() {
     }
   }
 
-  async function join(competitionId) {
+  function myApplicationForCompetition(c) {
+    if (!joinTeamId) return null;
+    const tid = Number(joinTeamId);
+    return (c.teams || []).find((ct) => ct.teamId === tid) || null;
+  }
+
+  async function applyToQualifiers(competitionId) {
     setJoinMsg(null);
     if (!joinTeamId) {
       setJoinMsg({ type: 'error', text: 'Select a team.' });
       return;
     }
     try {
-      await apiRequest(`/api/player/competitions/${competitionId}/join`, {
+      await apiRequest(`/api/player/competitions/${competitionId}/apply-qualifiers`, {
         method: 'POST',
         body: { teamId: Number(joinTeamId) },
       });
-      setJoinMsg({ type: 'ok', text: 'Team joined competition.' });
+      setJoinMsg({
+        type: 'ok',
+        text: 'Application sent. An admin will review your team before qualifiers.',
+      });
       await loadDetail(competitionId);
       await loadList();
     } catch (e) {
@@ -169,14 +226,15 @@ export default function Competitions() {
     <div>
       <h1 className="page-title">Competitions</h1>
       <p className="muted" style={{ marginBottom: '1.5rem', maxWidth: 560 }}>
-        Public tournaments from the API — expand a card for teams and sponsors. Players enroll with a
-        team they manage.
+        Tournaments use a qualification flow: your team applies first, an admin approves you for
+        qualifiers, then the best teams are marked qualified for the main draw (limited by max teams).
+        Expand a card for rosters and sponsors.
       </p>
 
       {!canJoin ? (
         <div className="card" style={{ marginBottom: '1.25rem' }}>
           <p style={{ margin: 0 }}>
-            <Link to="/login">Log in</Link> as a player to enroll a team.
+            <Link to="/login">Log in</Link> as a player to apply with a team.
           </p>
         </div>
       ) : teams.length === 0 ? (
@@ -187,7 +245,7 @@ export default function Competitions() {
         </div>
       ) : (
         <div className="form-group" style={{ maxWidth: 400 }}>
-          <label htmlFor="teamPick">Team to enroll</label>
+          <label htmlFor="teamPick">Team for applications</label>
           <select
             id="teamPick"
             value={joinTeamId}
@@ -322,6 +380,25 @@ export default function Competitions() {
           {competitions.map((c, idx) => {
             const bg = CARD_BG[idx % CARD_BG.length];
             const open = c.status === 'OPEN';
+            const full = isMainDrawFull(c);
+            const cap = maxTeamsCap(c);
+            const qN = qualifiedCount(c);
+            const appliedN = appliedActiveCount(c);
+            const sportLabel = c.sportType || 'Multi-sport';
+            const mine = canJoin ? myApplicationForCompetition(c) : null;
+            const canSubmitApply =
+              canJoin &&
+              open &&
+              !full &&
+              (!mine || mine.qualificationStatus === 'REJECTED');
+            let applyDisabledReason = null;
+            if (mine?.qualificationStatus === 'APPLIED') {
+              applyDisabledReason = 'Application pending review';
+            } else if (mine?.qualificationStatus === 'APPROVED_FOR_QUALIFIERS') {
+              applyDisabledReason = 'Approved for qualifiers — awaiting final qualification';
+            } else if (mine?.qualificationStatus === 'QUALIFIED') {
+              applyDisabledReason = 'Team already in main draw';
+            }
             return (
               <li
                 key={c.id}
@@ -352,9 +429,25 @@ export default function Competitions() {
                       <div>
                         <strong style={{ fontSize: '1.2rem' }}>{c.name}</strong>{' '}
                         <span className={open ? 'badge' : 'badge badge-warm'}>{c.status}</span>
+                        <span className="badge" style={{ marginLeft: '0.35rem' }}>
+                          Sport: {sportLabel}
+                        </span>
+                        {full ? (
+                          <span className="badge badge-warm" style={{ marginLeft: '0.35rem' }}>
+                            Competition full
+                          </span>
+                        ) : null}
                         <div className="muted" style={{ marginTop: '0.35rem' }}>
                           Starts {c.startDate?.slice?.(0, 10) || c.startDate}
                         </div>
+                        <div className="muted" style={{ marginTop: '0.25rem' }}>
+                          Applied teams: {appliedN} · Qualified: {qN}/{cap}
+                        </div>
+                        {mine ? (
+                          <div className="muted" style={{ marginTop: '0.25rem', fontSize: '0.9rem' }}>
+                            Your team: <strong>{statusLabel(mine.qualificationStatus)}</strong>
+                          </div>
+                        ) : null}
                       </div>
                       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                         <button
@@ -364,13 +457,28 @@ export default function Competitions() {
                         >
                           {expandedId === c.id ? 'Refresh details' : 'Details'}
                         </button>
-                        {canJoin && open ? (
+                        {canJoin && open && full ? (
+                          <button type="button" className="btn btn-sm" disabled>
+                            Competition full
+                          </button>
+                        ) : null}
+                        {canJoin && open && !full && canSubmitApply ? (
                           <button
                             type="button"
                             className="btn btn-sm btn-primary"
-                            onClick={() => join(c.id)}
+                            onClick={() => applyToQualifiers(c.id)}
                           >
-                            Join with team
+                            Apply to qualifiers
+                          </button>
+                        ) : null}
+                        {canJoin && open && !full && applyDisabledReason ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            disabled
+                            title={applyDisabledReason}
+                          >
+                            {applyDisabledReason}
                           </button>
                         ) : null}
                       </div>
@@ -379,13 +487,58 @@ export default function Competitions() {
                 </div>
                 {expandedId === c.id && detail?.id === c.id ? (
                   <div className="facility-card-body" style={{ borderTop: '1px solid var(--border)' }}>
+                    <p style={{ marginTop: 0 }}>
+                      <span className="badge">Sport: {detail.sportType || 'Multi-sport'}</span>{' '}
+                      <span className="muted">
+                        Applied teams: {appliedActiveCount(detail)} · Qualified:{' '}
+                        {qualifiedCount(detail)}/{maxTeamsCap(detail)}
+                      </span>
+                      {isMainDrawFull(detail) ? (
+                        <>
+                          {' '}
+                          <span className="badge badge-warm">Competition full</span>
+                        </>
+                      ) : null}
+                    </p>
                     <p>{detail.description}</p>
-                    <h3 style={{ fontSize: '1rem' }}>Teams enrolled</h3>
+                    <h3 style={{ fontSize: '1rem' }}>Teams</h3>
+                    <p className="muted" style={{ marginTop: '-0.25rem', fontSize: '0.9rem' }}>
+                      <strong>Qualified</strong> teams are in the main draw. Other rows are still in the
+                      application pipeline.
+                    </p>
+                    <div className="form-group" style={{ maxWidth: 360 }}>
+                      <label htmlFor={`roster-view-${detail.id}`}>Show list</label>
+                      <select
+                        id={`roster-view-${detail.id}`}
+                        value={rosterView}
+                        onChange={(e) => setRosterView(e.target.value)}
+                      >
+                        <option value="qualified">Qualified teams (main draw)</option>
+                        <option value="all">All applications</option>
+                      </select>
+                    </div>
+                    {(detail.teams?.length ?? 0) > 4 ? (
+                      <div className="form-group" style={{ maxWidth: 320 }}>
+                        <label htmlFor={`team-filter-${detail.id}`}>Search by team name</label>
+                        <input
+                          id={`team-filter-${detail.id}`}
+                          placeholder="Type to filter…"
+                          value={teamSearch}
+                          onChange={(e) => setTeamSearch(e.target.value)}
+                        />
+                      </div>
+                    ) : null}
                     <ul>
-                      {detail.teams?.map((ct) => (
-                        <li key={ct.id}>{ct.team?.name}</li>
+                      {rosterRows(detail, rosterView, teamSearch).map((ct) => (
+                        <li key={ct.id}>
+                          {ct.team?.name}{' '}
+                          <span className="badge badge-warm">{ct.qualificationStatus}</span>
+                        </li>
                       ))}
                     </ul>
+                    {rosterRows(detail, rosterView, teamSearch).length === 0 ? (
+                      <p className="muted">No teams match this view or search.</p>
+                    ) : null}
                     <h3 style={{ fontSize: '1rem' }}>Sponsors</h3>
                     <ul style={{ paddingLeft: '1.1rem' }}>
                       {detail.sponsorships?.length ? (

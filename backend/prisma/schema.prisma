@@ -192,6 +192,10 @@ model Competition {
   id          Int               @id @default(autoincrement())
   name        String
   description String?
+  /// Primary sport label for listings (e.g. Basketball, Multi-sport)
+  sportType   String            @default("Multi-sport") @map("sport_type")
+  /// Maximum teams in the main draw (QUALIFIED) while status is OPEN
+  maxTeams    Int               @default(8) @map("max_teams")
   startDate   DateTime          @map("start_date")
   endDate     DateTime?         @map("end_date")
   status      String            @default("DRAFT")
@@ -212,6 +216,8 @@ model CompetitionTeam {
   teamId        Int         @map("team_id")
   team          Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
   joinedAt      DateTime    @default(now()) @map("joined_at")
+  /// APPLIED | APPROVED_FOR_QUALIFIERS | QUALIFIED | REJECTED
+  qualificationStatus String @default("QUALIFIED") @map("qualification_status")
 
   @@unique([competitionId, teamId])
   @@map("competition_teams")

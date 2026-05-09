@@ -53,6 +53,8 @@ router.post(
   [
     body('name').trim().notEmpty(),
     body('description').optional(),
+    body('sportType').optional().trim().notEmpty(),
+    body('maxTeams').optional().isInt({ min: 2, max: 512 }),
     body('startDate').isISO8601(),
     body('endDate').optional().isISO8601(),
     body('status').optional(),
@@ -65,11 +67,36 @@ router.put(
   [
     body('name').optional().trim().notEmpty(),
     body('description').optional(),
+    body('sportType').optional().trim().notEmpty(),
+    body('maxTeams').optional().isInt({ min: 2, max: 512 }),
     body('startDate').optional().isISO8601(),
     body('endDate').optional().isISO8601(),
     body('status').optional(),
   ],
   competitionController.adminUpsert,
+);
+
+router.get(
+  '/competitions/:id/qualification-teams',
+  competitionController.adminListQualification,
+);
+
+router.post(
+  '/competitions/:id/qualification/approve-for-qualifiers',
+  [body('teamId').isInt()],
+  competitionController.adminApproveForQualifiers,
+);
+
+router.post(
+  '/competitions/:id/qualification/qualify',
+  [body('teamId').isInt()],
+  competitionController.adminQualifyForMain,
+);
+
+router.post(
+  '/competitions/:id/qualification/reject',
+  [body('teamId').isInt()],
+  competitionController.adminRejectQualification,
 );
 
 router.post(
