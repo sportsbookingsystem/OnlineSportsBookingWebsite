@@ -24,6 +24,50 @@ async function ensureProductionRoles() {
   }
 }
 
+/**
+ * Production: upsert one ADMIN user from env (no deletes). Skips if ADMIN_EMAIL or ADMIN_PASSWORD unset.
+ */
+async function ensureProductionAdminFromEnv() {
+  const email = process.env.ADMIN_EMAIL?.trim();
+  const password = process.env.ADMIN_PASSWORD;
+  if (!email || !password) {
+    console.warn(
+      'ADMIN_EMAIL / ADMIN_PASSWORD not set — skipping production admin upsert.',
+    );
+    return;
+  }
+
+  const adminRole = await prisma.role.findUnique({ where: { name: 'ADMIN' } });
+  if (!adminRole) {
+    console.warn('ADMIN role missing — skipping production admin upsert.');
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(String(password), 10);
+  const name =
+    process.env.ADMIN_NAME?.trim() || 'Platform Administrator';
+
+  await prisma.user.upsert({
+    where: { email },
+    update: {
+      passwordHash,
+      roleId: adminRole.id,
+      roleVerificationStatus: 'APPROVED',
+      status: 'ACTIVE',
+      ...(process.env.ADMIN_NAME?.trim() ? { name } : {}),
+    },
+    create: {
+      email,
+      passwordHash,
+      name,
+      roleId: adminRole.id,
+      roleVerificationStatus: 'APPROVED',
+    },
+  });
+
+  console.log('Render seed: admin user upserted for', email);
+}
+
 /** Only basketball, soccer, tennis, volleyball (matches frontend sportImages.js) */
 const IMG = {
   facilityBeirut:
@@ -62,6 +106,7 @@ async function main() {
   if (process.env.RENDER === 'true') {
     await ensureProductionRoles();
     console.log('Render seed: roles ensured (PLAYER, FACILITY_OWNER, SPONSOR, ADMIN).');
+    await ensureProductionAdminFromEnv();
     return;
   }
 

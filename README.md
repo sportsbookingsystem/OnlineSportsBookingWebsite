@@ -105,6 +105,8 @@ Set `VITE_API_URL` to your **deployed API URL** before building (see Vercel sect
    - `JWT_SECRET` — strong random string
    - `PORT` — usually injected by Render (keep `process.env.PORT` as implemented)
    - `CORS_ORIGIN` — your Vercel site origin, e.g. `https://your-app.vercel.app`
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — optional but recommended: each deploy’s `db:seed` (on Render) **upserts** this user as **ADMIN** with `APPROVED` verification (no other data is deleted). Use a strong password.
+   - `ADMIN_NAME` — optional display name for that admin (defaults to `Platform Administrator`; only applied on create unless set, then also updates name when set).
 
 Point the frontend `VITE_API_URL` at this service URL and redeploy the frontend.
 
