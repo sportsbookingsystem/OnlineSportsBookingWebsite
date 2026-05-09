@@ -1,0 +1,313 @@
+// Sports Booking Platform — Prisma schema (SQLite for local dev; matches DATABASE_URL=file:./dev.db)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// --- Auth & users --- (status / role names stored as strings for SQLite)
+
+model Role {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  users User[]
+}
+
+model User {
+  id           Int        @id @default(autoincrement())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  name         String
+  phone        String?
+  roleId       Int        @map("role_id")
+  role         Role       @relation(fields: [roleId], references: [id])
+  status       String     @default("ACTIVE")
+  /// PLAYER/ADMIN: APPROVED. FACILITY_OWNER/SPONSOR: PENDING until admin approves, then APPROVED or REJECTED.
+  roleVerificationStatus String @default("APPROVED") @map("role_verification_status")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  ownedFacilities Facility[]     @relation("FacilityOwner")
+  bookings        Booking[]
+  payments        Payment[]
+  teamMemberships TeamMember[]
+  teamsCreated    Team[]         @relation("TeamCreator")
+  sponsorProfile  Sponsor?
+  notifications   Notification[]
+
+  @@map("users")
+}
+
+// --- Facilities & fields ---
+
+model Facility {
+  id          Int      @id @default(autoincrement())
+  ownerId     Int      @map("owner_id")
+  owner       User     @relation("FacilityOwner", fields: [ownerId], references: [id])
+  name        String
+  description String?
+  address     String
+  city        String
+  lat         Float?
+  lng         Float?
+  isActive           Boolean  @default(true) @map("is_active")
+  // If true, new bookings stay PENDING until owner sets ownerApproved on Booking
+  approvalRequired   Boolean  @default(false) @map("approval_required")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  fields Field[]
+  photos FacilityPhoto[]
+
+  @@map("facilities")
+}
+
+model FacilityPhoto {
+  id         Int      @id @default(autoincrement())
+  facilityId Int      @map("facility_id")
+  facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  url        String
+  sortOrder  Int      @default(0) @map("sort_order")
+
+  @@map("facility_photos")
+}
+
+model Field {
+  id            Int      @id @default(autoincrement())
+  facilityId    Int      @map("facility_id")
+  facility      Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  name          String
+  sportType     String   @map("sport_type")
+  description   String?
+  pricePerSlot  Decimal  @map("price_per_slot")
+  locationNote  String?  @map("location_note")
+  // JSON string: { "mon": { "open": "08:00", "close": "22:00" }, ... } — used for display & slot generation
+  openingHoursJson String? @map("opening_hours_json")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  images     FieldImage[]
+  slots      AvailabilitySlot[]
+  bookings   Booking[]
+  homeMatches Match[] @relation("HomeField")
+
+  @@map("fields")
+}
+
+model FieldImage {
+  id        Int    @id @default(autoincrement())
+  fieldId   Int    @map("field_id")
+  field     Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  url       String
+  sortOrder Int    @default(0) @map("sort_order")
+
+  @@map("field_images")
+}
+
+// Recurring weekly pattern: which day (0=Sun..6=Sat) has which bookable window
+model AvailabilitySlot {
+  id        Int    @id @default(autoincrement())
+  fieldId   Int    @map("field_id")
+  field     Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  dayOfWeek Int    @map("day_of_week") // 0-6
+  startTime String @map("start_time") // "HH:MM" 24h
+  endTime   String @map("end_time")
+
+  @@map("availability_slots")
+}
+
+model Booking {
+  id              Int           @id @default(autoincrement())
+  fieldId         Int           @map("field_id")
+  field           Field         @relation(fields: [fieldId], references: [id])
+  userId          Int           @map("user_id")
+  user            User          @relation(fields: [userId], references: [id])
+  bookingDate     DateTime      @map("booking_date")
+  startTime       String        @map("start_time")
+  endTime         String        @map("end_time")
+  /// Session length in hours (1, 1.5, or 2). Total price = platform hourly rate × duration.
+  durationHours   Float         @default(1) @map("duration_hours")
+  status          String        @default("PENDING")
+  ownerApproved   Boolean?      @map("owner_approval") // null = no approval workflow; true/false if owner must approve
+  cancelledAt     DateTime?     @map("cancelled_at")
+  notes           String?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  payment Payment?
+
+  @@unique([fieldId, bookingDate, startTime], name: "unique_field_date_start")
+  @@map("bookings")
+}
+
+model Payment {
+  id        Int           @id @default(autoincrement())
+  bookingId Int           @unique @map("booking_id")
+  booking   Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  userId    Int           @map("user_id")
+  user      User          @relation(fields: [userId], references: [id])
+  amount    Decimal
+  status    String        @default("PENDING")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  @@map("payments")
+}
+
+// --- Teams & competitions ---
+
+model Team {
+  id        Int      @id @default(autoincrement())
+  name      String
+  creatorId Int      @map("creator_id")
+  creator   User     @relation("TeamCreator", fields: [creatorId], references: [id])
+  createdAt DateTime @default(now()) @map("created_at")
+
+  members      TeamMember[]
+  competitions CompetitionTeam[]
+  homeMatches  Match[]           @relation("HomeTeam")
+  awayMatches  Match[]           @relation("AwayTeam")
+  rewards      Reward[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id     Int   @id @default(autoincrement())
+  teamId Int   @map("team_id")
+  team   Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId Int   @map("user_id")
+  user   User  @relation(fields: [userId], references: [id])
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  @@unique([teamId, userId])
+  @@map("team_members")
+}
+
+model Competition {
+  id          Int               @id @default(autoincrement())
+  name        String
+  description String?
+  startDate   DateTime          @map("start_date")
+  endDate     DateTime?         @map("end_date")
+  status      String            @default("DRAFT")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  teams        CompetitionTeam[]
+  matches      Match[]
+  sponsorships Sponsorship[]
+  rewards      Reward[]
+
+  @@map("competitions")
+}
+
+model CompetitionTeam {
+  id            Int         @id @default(autoincrement())
+  competitionId Int         @map("competition_id")
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  teamId        Int         @map("team_id")
+  team          Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  joinedAt      DateTime    @default(now()) @map("joined_at")
+
+  @@unique([competitionId, teamId])
+  @@map("competition_teams")
+}
+
+model Match {
+  id            Int         @id @default(autoincrement())
+  competitionId Int?        @map("competition_id")
+  competition   Competition? @relation(fields: [competitionId], references: [id])
+  homeTeamId    Int         @map("home_team_id")
+  homeTeam      Team        @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeamId    Int         @map("away_team_id")
+  awayTeam      Team        @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  fieldId       Int?        @map("field_id")
+  field         Field?      @relation("HomeField", fields: [fieldId], references: [id])
+  matchDate     DateTime    @map("match_date")
+  status        String      @default("scheduled") // scheduled, played, cancelled
+
+  result MatchResult?
+
+  @@map("matches")
+}
+
+model MatchResult {
+  id         Int      @id @default(autoincrement())
+  matchId    Int      @unique @map("match_id")
+  match      Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  homeScore  Int      @map("home_score")
+  awayScore  Int      @map("away_score")
+  winnerId   Int?     @map("winner_team_id")
+  recordedAt DateTime @default(now()) @map("recorded_at")
+
+  @@map("match_results")
+}
+
+// Reward logic (business): after admin records match result, winning team may receive
+// pool share from platform booking revenue + optional sponsor pledge for that competition.
+model Reward {
+  id               Int           @id @default(autoincrement())
+  teamId           Int           @map("team_id")
+  team             Team          @relation(fields: [teamId], references: [id])
+  competitionId    Int?          @map("competition_id")
+  competition      Competition?  @relation(fields: [competitionId], references: [id])
+  amount           Decimal
+  source           String
+  status           String        @default("PENDING")
+  // Human-readable breakdown for dashboards / professor demo
+  descriptionNote  String?       @map("description_note")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  finalizedAt      DateTime?     @map("finalized_at")
+
+  @@map("rewards")
+}
+
+// --- Sponsors ---
+
+model Sponsor {
+  id           Int    @id @default(autoincrement())
+  userId       Int    @unique @map("user_id")
+  user         User   @relation(fields: [userId], references: [id])
+  companyName  String @map("company_name")
+  website      String?
+  description  String?
+  logoUrl      String? @map("logo_url")
+
+  sponsorships Sponsorship[]
+
+  @@map("sponsors")
+}
+
+model Sponsorship {
+  id               Int                @id @default(autoincrement())
+  sponsorId        Int                @map("sponsor_id")
+  sponsor          Sponsor            @relation(fields: [sponsorId], references: [id], onDelete: Cascade)
+  competitionId    Int                @map("competition_id")
+  competition      Competition        @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  amount           Decimal
+  rewardContribution Decimal          @default(0) @map("reward_contribution")
+  status           String             @default("PENDING")
+  notes            String?
+  sponsorAcknowledged Boolean         @default(false) @map("sponsor_acknowledged")
+  adHeadline       String?            @map("ad_headline")
+  adImageUrl       String?            @map("ad_image_url")
+  createdAt        DateTime           @default(now()) @map("created_at")
+
+  @@map("sponsorships")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
