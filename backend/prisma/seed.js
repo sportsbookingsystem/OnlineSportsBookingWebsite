@@ -9,6 +9,21 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+/**
+ * Render / production: only ensure Role rows exist (idempotent). No deletes — safe to run every deploy.
+ * Full demo seed below runs locally when RENDER is not set.
+ */
+async function ensureProductionRoles() {
+  const names = ['PLAYER', 'FACILITY_OWNER', 'SPONSOR', 'ADMIN'];
+  for (const name of names) {
+    await prisma.role.upsert({
+      where: { name },
+      update: {},
+      create: { name },
+    });
+  }
+}
+
 /** Only basketball, soccer, tennis, volleyball (matches frontend sportImages.js) */
 const IMG = {
   facilityBeirut:
@@ -44,6 +59,12 @@ const hoursJson = JSON.stringify({
 });
 
 async function main() {
+  if (process.env.RENDER === 'true') {
+    await ensureProductionRoles();
+    console.log('Render seed: roles ensured (PLAYER, FACILITY_OWNER, SPONSOR, ADMIN).');
+    return;
+  }
+
   await prisma.notification.deleteMany();
   await prisma.reward.deleteMany();
   await prisma.matchResult.deleteMany();

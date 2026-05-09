@@ -97,8 +97,8 @@ Set `VITE_API_URL` to your **deployed API URL** before building (see Vercel sect
 ### Backend on Render
 
 1. Create a **Web Service** from the repo; set **root directory** to `backend`.
-2. **Build command:** `npm install && npx prisma@5.22.0 generate && npm run prisma:migrate:render`  
-   This runs **`migrate resolve --rolled-back 20260509120000_init || true`** then **`migrate deploy`** (Prisma 5.22) so a previously failed init migration does not block deploys. Remove or simplify after production is healthy.
+2. **Build command:** `npm install && npx prisma@5.22.0 generate && npm run prisma:migrate:render && npm run db:seed`  
+   This runs **`migrate resolve --rolled-back 20260509120000_init || true`** then **`migrate deploy`** (Prisma 5.22), then **`db:seed`**. On Render (`RENDER=true`), seed only **upserts roles** (no data wipe). Locally, `db:seed` still performs the full demo reset. Remove or simplify the resolve step after production is healthy.
 3. **Start command:** `npm start`
 4. **Environment variables** (Render dashboard):
    - `DATABASE_URL` — use a **managed PostgreSQL** instance on Render (or another host). SQLite file storage is not durable on ephemeral disks.
