@@ -98,7 +98,7 @@ Set `VITE_API_URL` to your **deployed API URL** before building (see Vercel sect
 
 1. Create a **Web Service** from the repo; set **root directory** to `backend`.
 2. **Build command:** `npm install && npx prisma@5.22.0 generate && npm run prisma:migrate:render && npm run db:seed`  
-   This runs **`migrate resolve --rolled-back 20260509120000_init || true`** then **`migrate deploy`** (Prisma 5.22), then **`db:seed`**. On Render (`RENDER=true`), seed only **upserts roles** (no data wipe). Locally, `db:seed` still performs the full demo reset. Remove or simplify the resolve step after production is healthy.
+   This runs **`migrate resolve --rolled-back 20260509120000_init || true`** then **`migrate deploy`** (Prisma 5.22), then **`db:seed`**. On Render (`RENDER=true`), seed **does not delete data**: it upserts roles, admin (if env set), and **idempotent demo** facilities, fields, competition, teams, and sponsorship (see env vars below). Locally, `db:seed` still performs the full destructive demo reset. Remove or simplify the resolve step after production is healthy.
 3. **Start command:** `npm start`
 4. **Environment variables** (Render dashboard):
    - `DATABASE_URL` — use a **managed PostgreSQL** instance on Render (or another host). SQLite file storage is not durable on ephemeral disks.
@@ -107,6 +107,7 @@ Set `VITE_API_URL` to your **deployed API URL** before building (see Vercel sect
    - `CORS_ORIGIN` — your Vercel site origin, e.g. `https://your-app.vercel.app`
    - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — optional but recommended: each deploy’s `db:seed` (on Render) **upserts** this user as **ADMIN** with `APPROVED` verification (no other data is deleted). Use a strong password.
    - `ADMIN_NAME` — optional display name for that admin (defaults to `Platform Administrator`; only applied on create unless set, then also updates name when set).
+   - **Demo content (optional overrides)** — default emails use `@sportsbook.internal` so they rarely collide with real users: `DEMO_OWNER_EMAIL`, `DEMO_PLAYER1_EMAIL`, `DEMO_PLAYER2_EMAIL`, `DEMO_SPONSOR_EMAIL`. **`DEMO_SEED_PASSWORD`** sets the password for **new** demo accounts only (default `ChangeMeDemo2026!` if unset). If an email is already registered with a **different** role, demo seed skips attaching venues to that user and logs a warning.
 
 Point the frontend `VITE_API_URL` at this service URL and redeploy the frontend.
 
