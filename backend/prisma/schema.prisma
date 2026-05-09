@@ -1,11 +1,11 @@
-// Sports Booking Platform — Prisma schema (SQLite for local dev; matches DATABASE_URL=file:./dev.db)
+// Sports Booking Platform — Prisma schema (PostgreSQL via DATABASE_URL)
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -26,8 +26,6 @@ model User {
   roleId       Int        @map("role_id")
   role         Role       @relation(fields: [roleId], references: [id])
   status       String     @default("ACTIVE")
-  /// PLAYER/ADMIN: APPROVED. FACILITY_OWNER/SPONSOR: PENDING until admin approves, then APPROVED or REJECTED.
-  roleVerificationStatus String @default("APPROVED") @map("role_verification_status")
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
@@ -130,8 +128,6 @@ model Booking {
   bookingDate     DateTime      @map("booking_date")
   startTime       String        @map("start_time")
   endTime         String        @map("end_time")
-  /// Session length in hours (1, 1.5, or 2). Total price = platform hourly rate × duration.
-  durationHours   Float         @default(1) @map("duration_hours")
   status          String        @default("PENDING")
   ownerApproved   Boolean?      @map("owner_approval") // null = no approval workflow; true/false if owner must approve
   cancelledAt     DateTime?     @map("cancelled_at")
@@ -292,9 +288,6 @@ model Sponsorship {
   rewardContribution Decimal          @default(0) @map("reward_contribution")
   status           String             @default("PENDING")
   notes            String?
-  sponsorAcknowledged Boolean         @default(false) @map("sponsor_acknowledged")
-  adHeadline       String?            @map("ad_headline")
-  adImageUrl       String?            @map("ad_image_url")
   createdAt        DateTime           @default(now()) @map("created_at")
 
   @@map("sponsorships")
