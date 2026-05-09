@@ -25,7 +25,7 @@ model User {
   phone        String?
   roleId       Int        @map("role_id")
   role         Role       @relation(fields: [roleId], references: [id])
-  /** PENDING | APPROVED | REJECTED — FACILITY_OWNER / SPONSOR require APPROVED for elevated APIs */
+  /// PENDING | APPROVED | REJECTED - FACILITY_OWNER / SPONSOR require APPROVED for elevated APIs
   roleVerificationStatus String @default("APPROVED") @map("role_verification_status")
   status       String     @default("ACTIVE")
   createdAt    DateTime   @default(now()) @map("created_at")
