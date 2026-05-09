@@ -11,13 +11,13 @@ function maxTeamsCap(c) {
   return c.maxTeams ?? 8;
 }
 
-function qualifiedCount(c) {
-  return (c.teams || []).filter((ct) => ct.qualificationStatus === 'QUALIFIED').length;
+/** Backend sends qualificationStatus; missing treated as legacy main-draw row. */
+function rowStatus(ct) {
+  return ct.qualificationStatus ?? 'QUALIFIED';
 }
 
-/** Applications still active (excludes rejected). */
-function appliedActiveCount(c) {
-  return (c.teams || []).filter((ct) => ct.qualificationStatus !== 'REJECTED').length;
+function qualifiedCount(c) {
+  return (c.teams || []).filter((ct) => rowStatus(ct) === 'QUALIFIED').length;
 }
 
 function isMainDrawFull(c) {
@@ -39,16 +39,25 @@ function statusLabel(status) {
   }
 }
 
-function rosterRows(detail, view, teamSearch) {
+function filterTeamsBySearch(rows, teamSearch) {
   const q = teamSearch.trim().toLowerCase();
-  let rows = detail.teams || [];
-  if (view === 'qualified') {
-    rows = rows.filter((ct) => ct.qualificationStatus === 'QUALIFIED');
-  }
-  if (q) {
-    rows = rows.filter((ct) => (ct.team?.name || '').toLowerCase().includes(q));
-  }
-  return rows;
+  if (!q) return rows;
+  return rows.filter((ct) => (ct.team?.name || '').toLowerCase().includes(q));
+}
+
+function qualifiedRows(detail) {
+  return (detail.teams || []).filter((ct) => rowStatus(ct) === 'QUALIFIED');
+}
+
+/** Not in main draw: applied, awaiting qualification, or rejected. */
+function pipelineRows(detail) {
+  return (detail.teams || []).filter((ct) => rowStatus(ct) !== 'QUALIFIED');
+}
+
+function pipelineActiveCount(c) {
+  return (c.teams || []).filter((ct) =>
+    ['APPLIED', 'APPROVED_FOR_QUALIFIERS'].includes(rowStatus(ct)),
+  ).length;
 }
 
 export default function Competitions() {
@@ -71,7 +80,6 @@ export default function Competitions() {
   const [volunteerMsg, setVolunteerMsg] = useState(null);
   const [volunteers, setVolunteers] = useState([]);
   const [teamSearch, setTeamSearch] = useState('');
-  const [rosterView, setRosterView] = useState('qualified');
 
   const loadVolunteerData = useCallback(() => {
     try {
@@ -131,7 +139,6 @@ export default function Competitions() {
     setExpandedId(id);
     setDetail(null);
     setTeamSearch('');
-    setRosterView('qualified');
     try {
       const data = await apiRequest(`/api/public/competitions/${id}`, {
         token: null,
@@ -145,7 +152,9 @@ export default function Competitions() {
   function myApplicationForCompetition(c) {
     if (!joinTeamId) return null;
     const tid = Number(joinTeamId);
-    return (c.teams || []).find((ct) => ct.teamId === tid) || null;
+    const row = (c.teams || []).find((ct) => ct.teamId === tid);
+    if (!row) return null;
+    return { ...row, qualificationStatus: rowStatus(row) };
   }
 
   async function applyToQualifiers(competitionId) {
@@ -225,11 +234,24 @@ export default function Competitions() {
   return (
     <div>
       <h1 className="page-title">Competitions</h1>
-      <p className="muted" style={{ marginBottom: '1.5rem', maxWidth: 560 }}>
-        Tournaments use a qualification flow: your team applies first, an admin approves you for
-        qualifiers, then the best teams are marked qualified for the main draw (limited by max teams).
-        Expand a card for rosters and sponsors.
-      </p>
+      <div className="card" style={{ marginBottom: '1.25rem', maxWidth: 720 }}>
+        <h2 style={{ marginTop: 0, fontSize: '1.05rem' }}>How qualification works</h2>
+        <ol className="muted" style={{ margin: 0, paddingLeft: '1.25rem', lineHeight: 1.55 }}>
+          <li>
+            <strong>Apply to qualifiers</strong> — your team submits an application while the
+            tournament is open and spots remain.
+          </li>
+          <li>
+            <strong>Admin review</strong> — a platform admin approves strong teams for the qualifier
+            round (status: approved for qualifiers).
+          </li>
+          <li>
+            <strong>Main competition</strong> — only teams marked <strong>QUALIFIED</strong> count
+            toward the cap (e.g. <strong>Qualified teams: 3/8</strong>). Those teams enter the main
+            draw; everyone else stays in the application pipeline or is rejected.
+          </li>
+        </ol>
+      </div>
 
       {!canJoin ? (
         <div className="card" style={{ marginBottom: '1.25rem' }}>
@@ -383,7 +405,7 @@ export default function Competitions() {
             const full = isMainDrawFull(c);
             const cap = maxTeamsCap(c);
             const qN = qualifiedCount(c);
-            const appliedN = appliedActiveCount(c);
+            const pipeN = pipelineActiveCount(c);
             const sportLabel = c.sportType || 'Multi-sport';
             const mine = canJoin ? myApplicationForCompetition(c) : null;
             const canSubmitApply =
@@ -430,7 +452,7 @@ export default function Competitions() {
                         <strong style={{ fontSize: '1.2rem' }}>{c.name}</strong>{' '}
                         <span className={open ? 'badge' : 'badge badge-warm'}>{c.status}</span>
                         <span className="badge" style={{ marginLeft: '0.35rem' }}>
-                          Sport: {sportLabel}
+                          Sport · {sportLabel}
                         </span>
                         {full ? (
                           <span className="badge badge-warm" style={{ marginLeft: '0.35rem' }}>
@@ -441,7 +463,13 @@ export default function Competitions() {
                           Starts {c.startDate?.slice?.(0, 10) || c.startDate}
                         </div>
                         <div className="muted" style={{ marginTop: '0.25rem' }}>
-                          Applied teams: {appliedN} · Qualified: {qN}/{cap}
+                          <strong>Qualified teams: {qN}/{cap}</strong>
+                          {pipeN > 0 ? (
+                            <span>
+                              {' '}
+                              · In qualifier pipeline: {pipeN}
+                            </span>
+                          ) : null}
                         </div>
                         {mine ? (
                           <div className="muted" style={{ marginTop: '0.25rem', fontSize: '0.9rem' }}>
@@ -488,56 +516,80 @@ export default function Competitions() {
                 {expandedId === c.id && detail?.id === c.id ? (
                   <div className="facility-card-body" style={{ borderTop: '1px solid var(--border)' }}>
                     <p style={{ marginTop: 0 }}>
-                      <span className="badge">Sport: {detail.sportType || 'Multi-sport'}</span>{' '}
+                      <span className="badge">Sport · {detail.sportType || 'Multi-sport'}</span>{' '}
                       <span className="muted">
-                        Applied teams: {appliedActiveCount(detail)} · Qualified:{' '}
-                        {qualifiedCount(detail)}/{maxTeamsCap(detail)}
+                        <strong>
+                          Qualified teams: {qualifiedCount(detail)}/{maxTeamsCap(detail)}
+                        </strong>
+                        {pipelineActiveCount(detail) > 0 ? (
+                          <span>
+                            {' '}
+                            · In pipeline: {pipelineActiveCount(detail)}
+                          </span>
+                        ) : null}
                       </span>
                       {isMainDrawFull(detail) ? (
                         <>
                           {' '}
-                          <span className="badge badge-warm">Competition full</span>
+                          <span className="badge badge-warm">Main draw full</span>
                         </>
                       ) : null}
                     </p>
                     <p>{detail.description}</p>
-                    <h3 style={{ fontSize: '1rem' }}>Teams</h3>
-                    <p className="muted" style={{ marginTop: '-0.25rem', fontSize: '0.9rem' }}>
-                      <strong>Qualified</strong> teams are in the main draw. Other rows are still in the
-                      application pipeline.
-                    </p>
-                    <div className="form-group" style={{ maxWidth: 360 }}>
-                      <label htmlFor={`roster-view-${detail.id}`}>Show list</label>
-                      <select
-                        id={`roster-view-${detail.id}`}
-                        value={rosterView}
-                        onChange={(e) => setRosterView(e.target.value)}
-                      >
-                        <option value="qualified">Qualified teams (main draw)</option>
-                        <option value="all">All applications</option>
-                      </select>
-                    </div>
                     {(detail.teams?.length ?? 0) > 4 ? (
                       <div className="form-group" style={{ maxWidth: 320 }}>
-                        <label htmlFor={`team-filter-${detail.id}`}>Search by team name</label>
+                        <label htmlFor={`team-filter-${detail.id}`}>Search teams by name</label>
                         <input
                           id={`team-filter-${detail.id}`}
-                          placeholder="Type to filter…"
+                          placeholder="Filter both lists below…"
                           value={teamSearch}
                           onChange={(e) => setTeamSearch(e.target.value)}
                         />
                       </div>
                     ) : null}
+                    <h3 style={{ fontSize: '1rem', marginBottom: '0.35rem' }}>
+                      Qualified teams (main competition)
+                    </h3>
+                    <p className="muted" style={{ marginTop: 0, fontSize: '0.9rem' }}>
+                      These teams are enrolled in the main draw (max {maxTeamsCap(detail)}).
+                    </p>
                     <ul>
-                      {rosterRows(detail, rosterView, teamSearch).map((ct) => (
+                      {filterTeamsBySearch(qualifiedRows(detail), teamSearch).map((ct) => (
                         <li key={ct.id}>
                           {ct.team?.name}{' '}
-                          <span className="badge badge-warm">{ct.qualificationStatus}</span>
+                          <span className="badge">{rowStatus(ct)}</span>
                         </li>
                       ))}
                     </ul>
-                    {rosterRows(detail, rosterView, teamSearch).length === 0 ? (
-                      <p className="muted">No teams match this view or search.</p>
+                    {filterTeamsBySearch(qualifiedRows(detail), teamSearch).length === 0 ? (
+                      <p className="muted">No qualified teams match the search.</p>
+                    ) : null}
+                    {pipelineRows(detail).length > 0 ? (
+                      <>
+                        <h3
+                          style={{
+                            fontSize: '1rem',
+                            marginBottom: '0.35rem',
+                            marginTop: '1.25rem',
+                          }}
+                        >
+                          Applications &amp; qualifier pipeline
+                        </h3>
+                        <p className="muted" style={{ marginTop: 0, fontSize: '0.9rem' }}>
+                          Applied, approved for qualifiers, or rejected — not yet in the main draw.
+                        </p>
+                        <ul>
+                          {filterTeamsBySearch(pipelineRows(detail), teamSearch).map((ct) => (
+                            <li key={ct.id}>
+                              {ct.team?.name}{' '}
+                              <span className="badge badge-warm">{rowStatus(ct)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        {filterTeamsBySearch(pipelineRows(detail), teamSearch).length === 0 ? (
+                          <p className="muted">No pipeline teams match the search.</p>
+                        ) : null}
+                      </>
                     ) : null}
                     <h3 style={{ fontSize: '1rem' }}>Sponsors</h3>
                     <ul style={{ paddingLeft: '1.1rem' }}>
