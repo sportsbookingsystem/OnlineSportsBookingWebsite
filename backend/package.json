@@ -7,6 +7,8 @@
     "dev": "node scripts/free-port.mjs && node --watch src/index.js",
     "start": "node src/index.js",
     "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:resolve-init-rolled-back": "prisma migrate resolve --rolled-back 20260509120000_init",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "db:seed": "node prisma/seed.js"

@@ -107,6 +107,35 @@ Set `VITE_API_URL` to your **deployed API URL** before building (see Vercel sect
 
 Point the frontend `VITE_API_URL` at this service URL and redeploy the frontend.
 
+### Render: fix failed migration (P3009)
+
+If deploys fail with **P3009** because `20260509120000_init` was recorded as failed, clear that state **without** resetting the database:
+
+1. Open **Render → your Web Service → Shell** (or run locally with the **same** production `DATABASE_URL`).
+2. From the repo **`backend`** root (where `prisma/` lives):
+
+```bash
+cd backend
+npm install
+npx prisma@5.22.0 migrate resolve --rolled-back 20260509120000_init
+npx prisma@5.22.0 migrate deploy
+```
+
+`--rolled-back` marks the failed migration as rolled back so `migrate deploy` can apply it again.
+
+**Or** use the npm alias (still uses Prisma 5.22 from `devDependencies` after `npm install`):
+
+```bash
+cd backend
+npm install
+npm run prisma:migrate:resolve-init-rolled-back
+npm run prisma:migrate:deploy
+```
+
+Then trigger a normal deploy (build can keep running `migrate deploy` as usual).
+
+If the first migration **partially** created tables before it failed, `migrate deploy` may error on “already exists”. In that case inspect the database (e.g. list tables in `public`) and fix duplicates manually or adjust—do **not** run `migrate reset` on production.
+
 ## Project layout
 
 - `frontend/` — React SPA, `src/api/client.js` uses `import.meta.env.VITE_API_URL`
