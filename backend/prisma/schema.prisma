@@ -130,6 +130,8 @@ model Booking {
   bookingDate     DateTime      @map("booking_date")
   startTime       String        @map("start_time")
   endTime         String        @map("end_time")
+  /// Session length in hours (1, 1.5, or 2) — used with sport pricing
+  durationHours   Decimal       @default(1) @map("duration_hours") @db.Decimal(4, 2)
   status          String        @default("PENDING")
   ownerApproved   Boolean?      @map("owner_approval") // null = no approval workflow; true/false if owner must approve
   cancelledAt     DateTime?     @map("cancelled_at")
